@@ -33,6 +33,7 @@ set -euo pipefail
 corru_audio_fmt="alaw"
 corru_audio_rate="44100"
 ffmpeg_pix_fmt="yuv420p"
+ffmpeg_output_codec="libx264"
 ffmpeg_output_crf="0" # Lossless output for these crispy pixels
 
 # Code and things start here!
@@ -57,6 +58,7 @@ args:
 -r 		Intermediate raw audio rate
 -a 		Intermediate raw audio format
 -c 		Output file CRF
+-m		Let FFmpeg detect output format (useful for images)
 -h 		Show this message
 EOL
 	exit 1
@@ -67,25 +69,27 @@ if [ -z "$*" ]; then
 fi
 
 f_set=0
+m_set=0
 argnum=1
 for arg in "$@"; do
 	argnum=$((argnum+1))
 	case "$arg" in
 	-i) eval input_file="\$$argnum" ;;
 	-o) eval output_file="\$$argnum" ;;
+	-f) shift $((argnum-1)) ; f_set=1; break ;;
 	-p) eval ffmpeg_pix_fmt="\$$argnum" ;;
 	-r) eval corru_audio_rate="\$$argnum" ;;
 	-a) eval corru_audio_fmt="\$$argnum" ;;
 	-c) eval ffmpeg_output_crf="\$$argnum" ;;
+	-m) m_set=1 ;;
 	-h) helpmsg ;;
-	-f) shift $((argnum-1)) ; f_set=1; break ;;
 	*) : ;;
 	esac
 done
 
 # checks
 
-if ! command -v ffmpeg > /dev/null; then
+if ! command -v ffmpeg >/dev/null 2>&1; then
 	error "FFmpeg not found"
 fi
 
@@ -114,8 +118,6 @@ if [ "$?" != 0 ]; then
 	exit "$?"
 fi
 
-echo $ffmpeg_pix_fmt
-
 ffmpeg \
 	-y \
 	-i "$input_file" \
@@ -131,13 +133,25 @@ ffmpeg \
 	"$@" `: corruption args` \
 	-f "$corru_audio_fmt" \
 	pipe: \
-| ffmpeg \
-	-y \
-	-f rawvideo \
-	-r "$video_framerate" \
-	-video_size "$video_dimensions" \
-	-pix_fmt "$ffmpeg_pix_fmt" \
-	-i pipe: \
-	-c:v libx264 \
-	-crf "$ffmpeg_output_crf" \
-	"$output_file" || exit "$?"
+| if [ "$m_set" -eq 0 ]; then
+	ffmpeg \
+		-y \
+		-f rawvideo \
+		-r "$video_framerate" \
+		-video_size "$video_dimensions" \
+		-pix_fmt "$ffmpeg_pix_fmt" \
+		-i pipe: \
+		-c:v "$ffmpeg_output_codec" \
+		-crf "$ffmpeg_output_crf" \
+		"$output_file" || exit "$?"
+  else
+	ffmpeg \
+		-y \
+		-f rawvideo \
+		-r "$video_framerate" \
+		-video_size "$video_dimensions" \
+		-pix_fmt "$ffmpeg_pix_fmt" \
+		-i pipe: \
+		-c:v png \
+		"$output_file" || exit "$?"
+  fi
